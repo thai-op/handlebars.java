@@ -21,7 +21,11 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Writer;
+import java.lang.reflect.Type;
 import java.net.MalformedURLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 
 import javax.servlet.http.HttpServletRequest;
@@ -42,7 +46,10 @@ import org.kohsuke.args4j.Option;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.github.jknack.handlebars.Context;
 import com.github.jknack.handlebars.Handlebars;
+import com.github.jknack.handlebars.Helper;
 import com.github.jknack.handlebars.HelperRegistry;
 import com.github.jknack.handlebars.HumanizeHelper;
 import com.github.jknack.handlebars.Jackson2Helper;
@@ -50,6 +57,16 @@ import com.github.jknack.handlebars.helper.StringHelpers;
 import com.github.jknack.handlebars.io.FileTemplateLoader;
 import com.github.jknack.handlebars.io.TemplateLoader;
 import com.github.jknack.handlebars.io.URLTemplateLoader;
+import com.google.api.client.http.GenericUrl;
+import com.google.api.client.http.HttpRequest;
+import com.google.api.client.http.HttpRequestFactory;
+import com.google.api.client.http.HttpResponse;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.GenericJson;
+import com.google.api.client.json.JsonObjectParser;
+import com.google.api.client.json.gson.GsonFactory;
+import com.google.api.client.util.Key;
+import com.google.common.reflect.TypeToken;
 
 /**
  * A handlebars web server.
@@ -72,18 +89,7 @@ public class HbsServer {
   public static String version;
 
   static {
-    InputStream in = null;
-    try {
-      in = HbsServer.class.getResourceAsStream("/hbs.properties");
-      Properties properties = new Properties();
-      properties.load(in);
-      version = properties.getProperty("version");
-    } catch (IOException e) {
-      e.printStackTrace();
-    } finally {
-      IOUtils.closeQuietly(in);
-    }
-
+    version = "4.3.1";
   }
 
   public static class Options {
@@ -141,6 +147,32 @@ public class HbsServer {
     }
   }
 
+  public static class Link extends GenericJson {
+    @Key
+    public String pageId;
+
+    @Key
+    public String title;
+  }
+
+  public static List<Link> request(String orgId, String topic) {
+    String url = "https://wkp7okvjfe.execute-api.us-east-1.amazonaws.com/prod/similarpages?o="
+        + orgId + "&q=" + topic;
+    HttpRequestFactory requestFactory = new NetHttpTransport().createRequestFactory();
+    HttpRequest request;
+    GsonFactory factory = new GsonFactory();
+
+    try {
+      request = requestFactory.buildGetRequest(new GenericUrl(url));
+      request.setParser(new JsonObjectParser(factory));
+      HttpResponse response = request.execute();
+      Link[] json = response.parseAs(Link[].class);
+      return Arrays.asList(json);
+    } catch (IOException e) {
+      throw new RuntimeException("unable to fetch " + url, e);
+    }
+  }
+
   /**
    * Start a Handlebars server.
    *
@@ -163,11 +195,24 @@ public class HbsServer {
      * that render the plain text.
      */
     handlebars.registerHelper(
-      HelperRegistry.HELPER_MISSING,
-      (context, options) -> new Handlebars.SafeString(options.fn.text())
-    );
+        HelperRegistry.HELPER_MISSING,
+        (context, options) -> new Handlebars.SafeString(options.fn.text()));
     handlebars.registerHelper("json", Jackson2Helper.INSTANCE);
-//    handlebars.registerHelper("md", new MarkdownHelper());
+    handlebars.registerHelper("hss-related-links", new Helper<Object>() {
+      @Override
+      public Object apply(Object context, com.github.jknack.handlebars.Options options) throws IOException {
+        String topic = options.get("topic");
+        String ordId = options.get("org_id");
+
+        List<Link> links = request(ordId, topic);
+        Context newContext = Context.newBuilder(context)
+            .combine("links", links)
+            .build();
+
+        return options.fn(newContext);
+      }
+    });
+    // handlebars.registerHelper("md", new MarkdownHelper());
     // String helpers
     StringHelpers.register(handlebars);
     // Humanize helpers

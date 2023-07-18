@@ -23,6 +23,8 @@ import static org.apache.commons.lang3.Validate.isTrue;
 import static org.apache.commons.lang3.Validate.notNull;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.Writer;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -127,8 +129,12 @@ abstract class BaseTemplate implements Template {
     } catch (HandlebarsException ex) {
       throw ex;
     } catch (Exception ex) {
+      StringWriter sw = new StringWriter();
+      PrintWriter pw = new PrintWriter(sw);
+      ex.printStackTrace(pw);
+      ex.printStackTrace();
       String evidence = toString();
-      String reason = ex.toString();
+      String reason = ex.toString() + ". Stacktrace: " + sw.toString();
       String message = filename + ":" + line + ":" + column + ": "
           + reason + "\n";
       message += "    " + join(split(evidence, "\n"), "\n    ");
